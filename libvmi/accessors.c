@@ -134,8 +134,6 @@ vmi_get_offset(
     vmi_instance_t vmi,
     char *offset_name)
 {
-    size_t max_length = 100;
-
     if (vmi->os_interface == NULL || vmi->os_interface->os_get_offset == NULL ) {
         return 0;
     }
@@ -147,7 +145,14 @@ uint64_t
 vmi_get_memsize(
     vmi_instance_t vmi)
 {
-    return vmi->size;
+    return vmi->allocated_ram_size;
+}
+
+addr_t
+vmi_get_max_physical_address(
+    vmi_instance_t vmi)
+{
+    return vmi->max_physical_address;
 }
 
 unsigned int
@@ -206,11 +211,11 @@ vmi_get_name(
     }
 }
 
-unsigned long
+uint64_t
 vmi_get_vmid(
     vmi_instance_t vmi)
 {
-    unsigned long domid = VMI_INVALID_DOMID;
+    uint64_t domid = VMI_INVALID_DOMID;
     if(VMI_INVALID_DOMID == (domid = driver_get_id(vmi))) {
         char *name = vmi_get_name(vmi);
         domid = driver_get_id_from_name(vmi, name);
@@ -230,9 +235,9 @@ addr_t vmi_translate_ksym2v (vmi_instance_t vmi, const char *symbol)
     if (VMI_FAILURE == sym_cache_get(vmi, base_vaddr, 0, symbol, &address)) {
 
         if (vmi->os_interface && vmi->os_interface->os_ksym2v) {
-            status = vmi->os_interface->os_ksym2v(vmi, symbol, &base_vaddr,
-                    &address);
+            status = vmi->os_interface->os_ksym2v(vmi, symbol, &base_vaddr, &address);
             if (status == VMI_SUCCESS) {
+                address = canonical_addr(address);
                 sym_cache_set(vmi, base_vaddr, 0, symbol, address);
             }
         }
@@ -242,19 +247,31 @@ addr_t vmi_translate_ksym2v (vmi_instance_t vmi, const char *symbol)
 }
 
 /* convert a symbol into an address */
-addr_t vmi_translate_sym2v (vmi_instance_t vmi, addr_t base_vaddr, vmi_pid_t pid, const char *symbol)
+addr_t vmi_translate_sym2v (vmi_instance_t vmi, const access_context_t *ctx, const char *symbol)
 {
     status_t status = VMI_FAILURE;
     addr_t rva = 0;
     addr_t address = 0;
+    addr_t dtb = 0;
 
-    if (VMI_FAILURE == sym_cache_get(vmi, base_vaddr, pid, symbol, &address)) {
+    switch(ctx->translate_mechanism) {
+        case VMI_TM_PROCESS_PID:
+            dtb = vmi_pid_to_dtb(vmi, ctx->pid);
+            break;
+        case VMI_TM_PROCESS_DTB:
+            dtb = ctx->dtb;
+            break;
+        default:
+            dbprint(VMI_DEBUG_MISC, "sym2v only supported in a virtual context!\n");
+            return 0;
+    };
 
+    if (VMI_FAILURE == sym_cache_get(vmi, ctx->addr, dtb, symbol, &address)) {
         if (vmi->os_interface && vmi->os_interface->os_usym2rva) {
-            status  = vmi->os_interface->os_usym2rva(vmi, base_vaddr, pid, symbol, &rva);
+            status  = vmi->os_interface->os_usym2rva(vmi, ctx, symbol, &rva);
             if (status == VMI_SUCCESS) {
-                address = base_vaddr + rva;
-                sym_cache_set(vmi, base_vaddr, pid, symbol, address);
+                address = canonical_addr(ctx->addr + rva);
+                sym_cache_set(vmi, ctx->addr, dtb, symbol, address);
             }
         }
     }
@@ -263,17 +280,30 @@ addr_t vmi_translate_sym2v (vmi_instance_t vmi, addr_t base_vaddr, vmi_pid_t pid
 }
 
 /* convert an RVA into a symbol */
-const char* vmi_translate_v2sym(vmi_instance_t vmi, addr_t base_vaddr, vmi_pid_t pid, addr_t rva)
+const char* vmi_translate_v2sym(vmi_instance_t vmi, const access_context_t *ctx, addr_t rva)
 {
     char *ret = NULL;
+    addr_t dtb = 0;
 
-    if (VMI_FAILURE == rva_cache_get(vmi, base_vaddr, pid, rva, &ret)) {
-        if (vmi->os_interface && vmi->os_interface->os_rva2sym) {
-            ret = vmi->os_interface->os_rva2sym(vmi, rva, base_vaddr, pid);
+    switch(ctx->translate_mechanism) {
+        case VMI_TM_PROCESS_PID:
+            dtb = vmi_pid_to_dtb(vmi, ctx->pid);
+            break;
+        case VMI_TM_PROCESS_DTB:
+            dtb = ctx->dtb;
+            break;
+        default:
+            dbprint(VMI_DEBUG_MISC, "v2sym only supported in a virtual context!\n");
+            return 0;
+    };
+
+    if (VMI_FAILURE == rva_cache_get(vmi, ctx->addr, dtb, rva, &ret)) {
+        if (vmi->os_interface && vmi->os_interface->os_v2sym) {
+            ret = vmi->os_interface->os_v2sym(vmi, rva, ctx);
         }
 
         if (ret) {
-            rva_cache_set(vmi, base_vaddr, pid, rva, ret);
+            rva_cache_set(vmi, ctx->addr, dtb, rva, ret);
         }
     }
 
@@ -377,7 +407,8 @@ status_t vmi_pagetable_lookup_cache(
             return VMI_SUCCESS;
         }
         else {
-            v2p_cache_del(vmi, vaddr, dtb);
+            if ( VMI_FAILURE == v2p_cache_del(vmi, vaddr, dtb) )
+                return VMI_FAILURE;
         }
     }
 
@@ -447,7 +478,8 @@ addr_t vmi_translate_uv2p (vmi_instance_t vmi, addr_t virt_address, vmi_pid_t pi
     }
 
     if (VMI_SUCCESS != vmi_pagetable_lookup_cache(vmi, dtb, virt_address, &paddr)) {
-        pid_cache_del(vmi, pid);
+        if ( VMI_FAILURE == pid_cache_del(vmi, pid) )
+            return 0;
 
         dtb = vmi_pid_to_dtb(vmi, pid);
         if (dtb) {
@@ -459,4 +491,24 @@ addr_t vmi_translate_uv2p (vmi_instance_t vmi, addr_t virt_address, vmi_pid_t pi
         }
     }
     return paddr;
+}
+
+const char *
+vmi_get_linux_sysmap(
+    vmi_instance_t vmi)
+{
+    linux_instance_t linux_instance = NULL;
+
+    if(VMI_OS_LINUX != vmi->os_type || (VMI_INIT_PARTIAL & vmi->init_mode)){
+        return NULL;
+    }
+
+    if(!vmi->os_data){
+        return NULL;
+    }
+
+    linux_instance = vmi->os_data;
+
+    return linux_instance->sysmap;
+
 }

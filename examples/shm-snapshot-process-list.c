@@ -43,9 +43,9 @@ void list_processes(vmi_instance_t vmi, addr_t current_process,
     /* demonstrate name and id accessors */
     char* name2 = vmi_get_name(vmi);
     if (VMI_FILE != vmi_get_access_mode(vmi)) {
-        unsigned long id = vmi_get_vmid(vmi);
+        uint64_t id = vmi_get_vmid(vmi);
 
-        printf("Process listing for VM %s (id=%lu)\n", name2, id);
+        printf("Process listing for VM %s (id=%"PRIu64")\n", name2, id);
     } else {
         printf("Process listing for file %s\n", name2);
     }
@@ -119,6 +119,12 @@ void list_processes(vmi_instance_t vmi, addr_t current_process,
 
 int main (int argc, char **argv)
 {
+    /* this is the VM or file that we are looking at */
+    if (argc != 2) {
+        printf("Usage: %s <vmname>\n", argv[0]);
+        return 1;
+    }
+
 #if ENABLE_SHM_SNAPSHOT == 1
     vmi_instance_t vmi;
     unsigned char *memory = NULL;
@@ -130,12 +136,6 @@ int main (int argc, char **argv)
     vmi_pid_t pid = 0;
     unsigned long tasks_offset, pid_offset, name_offset;
     status_t status;
-
-    /* this is the VM or file that we are looking at */
-    if (argc != 2) {
-        printf("Usage: %s <vmname>\n", argv[0]);
-        return 1;
-    } // if
 
     char *name = argv[1];
 

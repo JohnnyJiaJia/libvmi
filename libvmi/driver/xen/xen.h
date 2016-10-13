@@ -61,7 +61,8 @@ void xen_set_domainname(
     const char *name);
 status_t xen_get_memsize(
     vmi_instance_t vmi,
-    uint64_t *size);
+    uint64_t *allocated_ram_size,
+    addr_t *maximum_physical_address);
 status_t xen_get_vcpureg(
     vmi_instance_t vmi,
     reg_t *value,
@@ -135,16 +136,6 @@ driver_xen_setup(vmi_instance_t vmi)
     driver.create_shm_snapshot_ptr = &xen_create_shm_snapshot;
     driver.destroy_shm_snapshot_ptr = &xen_destroy_shm_snapshot;
     driver.get_dgpma_ptr = &xen_get_dgpma;
-#endif
-#if ENABLE_XEN_EVENTS == 1
-    driver.events_listen_ptr = &xen_events_listen;
-    driver.are_events_pending_ptr = &xen_are_events_pending;
-    driver.set_reg_access_ptr = &xen_set_reg_access;
-    driver.set_intr_access_ptr = &xen_set_intr_access;
-    driver.set_mem_access_ptr = &xen_set_mem_access;
-    driver.start_single_step_ptr = &xen_start_single_step;
-    driver.stop_single_step_ptr = &xen_stop_single_step;
-    driver.shutdown_single_step_ptr = &xen_shutdown_single_step;
 #endif
     vmi->driver = driver;
     return VMI_SUCCESS;

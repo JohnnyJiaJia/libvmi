@@ -78,8 +78,6 @@ static void
 clean_cache(
     vmi_instance_t vmi)
 {
-    GList *list = NULL;
-
     while (g_queue_get_length(vmi->memory_cache_lru) > vmi->memory_cache_size_max / 2) {
         gint64 *paddr = g_queue_pop_tail(vmi->memory_cache_lru);
 
@@ -128,11 +126,11 @@ static memory_cache_entry_t create_new_entry (vmi_instance_t vmi, addr_t paddr,
     //
     // TODO: perform other reasonable checks
 
-    if (vmi->hvm && (paddr + length - 1 > vmi->size)) {
-        errprint("--requesting PA [0x%"PRIx64"] beyond memsize [0x%"PRIx64"]\n",
-                paddr + length, vmi->size);
-        errprint("\tpaddr: %"PRIx64", length %"PRIx32", vmi->size %"PRIx64"\n", paddr, length,
-                vmi->size);
+    if (vmi->hvm && (paddr + length > vmi->max_physical_address)) {
+        errprint("--requesting PA [0x%"PRIx64"] beyond max physical address [0x%"PRIx64"]\n",
+                paddr + length, vmi->max_physical_address);
+        errprint("\tpaddr: %"PRIx64", length %"PRIx32", vmi->max_physical_address %"PRIx64"\n", paddr, length,
+                vmi->max_physical_address);
         return 0;
     }
 
@@ -220,7 +218,6 @@ void memory_cache_remove(
     vmi_instance_t vmi,
     addr_t paddr)
 {
-    memory_cache_entry_t entry = NULL;
     addr_t paddr_aligned = paddr & ~(((addr_t) vmi->page_size) - 1);
 
     if (paddr != paddr_aligned) {
@@ -240,12 +237,8 @@ memory_cache_destroy(
     vmi->memory_cache_size_max = 0;
 
     if (vmi->memory_cache_lru) {
-#if GLIB_CHECK_VERSION(2, 32, 0)
-        g_queue_free_full(vmi->memory_cache_lru, g_free);
-#else
-        g_queue_foreach(vmi->memory_cache_lru, g_free, NULL);
+        g_queue_foreach(vmi->memory_cache_lru, (GFunc)g_free, NULL);
         g_queue_free(vmi->memory_cache_lru);
-#endif
         vmi->memory_cache_lru = NULL;
     }
 
@@ -263,13 +256,13 @@ memory_cache_destroy(
 #else
 void
 memory_cache_init(
-    vmi_instance_t vmi,
+    vmi_instance_t UNUSED(vmi),
     void *(*get_data) (vmi_instance_t,
                        addr_t,
                        uint32_t),
     void (*release_data) (void *,
                           size_t),
-    unsigned long age_limit)
+    unsigned long UNUSED(age_limit))
 {
     get_data_callback = get_data;
     release_data_callback = release_data;
